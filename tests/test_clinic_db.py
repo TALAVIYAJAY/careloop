@@ -127,3 +127,33 @@ def test_cancel_appointment(db):
     # Calling cancel again should return False
     cancelled_again = db.cancel_appointment(apt.id)
     assert cancelled_again is False
+
+
+def test_past_slot_booking_and_reschedule_rejected(db):
+    from datetime import datetime, timedelta
+    past_iso = (datetime.now() - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:00Z")
+
+    # 1. Attempting to book a past slot directly must fail
+    apt, err = db.book_slot_atomic(
+        patient_name="Past Test Patient",
+        patient_phone="+1-555-9876",
+        doctor_id="DOC_PED_01",
+        slot_iso=past_iso,
+        reason="Past checkup"
+    )
+    assert apt is None
+    assert "already passed" in err.lower()
+
+    # 2. Attempting to reschedule to a past slot must fail
+    apt_resched, err_resched = db.reschedule_appointment_atomic(
+        appointment_id="APT_ORTH_101",
+        new_slot_iso=past_iso
+    )
+    assert apt_resched is None
+    assert "already passed" in err_resched.lower()
+
+    # 3. Verify find_available_slots excludes past slots by default
+    all_open = db.find_available_slots()
+    for s in all_open:
+        assert not db.is_past_slot(s.start_time_iso)
+

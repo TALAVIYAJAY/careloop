@@ -323,14 +323,33 @@ class ClinicDatabase:
 
         return clean_doc_id or None
 
+    @staticmethod
+    def is_past_slot(slot_iso: str, ref_dt: Optional[datetime] = None) -> bool:
+        """
+        Determines whether an appointment slot's scheduled start time has already passed
+        relative to the local clinic wall-clock time.
+        """
+        if not slot_iso:
+            return False
+        try:
+            clean = str(slot_iso).strip().replace("Z", "").replace(" ", "T")
+            if len(clean) == 16:  # YYYY-MM-DDTHH:MM
+                clean += ":00"
+            slot_dt = datetime.fromisoformat(clean)
+            current_dt = ref_dt or datetime.now()
+            return slot_dt <= current_dt
+        except Exception:
+            return False
+
     def find_available_slots(
         self,
         specialty: Optional[str] = None,
         doctor_id: Optional[str] = None,
         doctor_name: Optional[str] = None,
-        date_str: Optional[str] = None
+        date_str: Optional[str] = None,
+        include_past: bool = False
     ) -> List[AppointmentSlot]:
-        """Returns open (AVAILABLE) slots matching filters."""
+        """Returns open (AVAILABLE) slots matching filters. Excludes past slots by default."""
         query = "SELECT * FROM slots WHERE status = 'AVAILABLE'"
         params = []
 
@@ -364,7 +383,10 @@ class ClinicDatabase:
             cursor = conn.cursor()
             cursor.execute(query, params)
             rows = cursor.fetchall()
-            return [AppointmentSlot(**dict(r)) for r in rows]
+            slots = [AppointmentSlot(**dict(r)) for r in rows]
+            if not include_past:
+                slots = [s for s in slots if not self.is_past_slot(s.start_time_iso)]
+            return slots
 
     def book_slot_atomic(
         self,
@@ -384,6 +406,10 @@ class ClinicDatabase:
         """
         if not patient_name or not patient_phone:
             return None, "Patient name and contact phone are required to complete booking."
+
+        # VALIDATION: Cannot book appointment in the past
+        if self.is_past_slot(slot_iso):
+            return None, f"Cannot book appointment: the requested slot ({slot_iso}) has already passed. Please select an upcoming opening."
 
         # Automatically resolve or create Master Patient record
         if not patient_id:
@@ -509,6 +535,10 @@ class ClinicDatabase:
             if is_cross_session:
                 if not patient_name:
                     return None, f"SECURITY AUTHENTICATION REQUIRED: To reschedule appointment '{appointment_id}' across sessions, patient full name must be provided for verification."
+
+            # VALIDATION: Cannot reschedule to a slot in the past
+            if self.is_past_slot(new_slot_iso):
+                return None, f"Cannot reschedule appointment: the requested slot ({new_slot_iso}) has already passed. Please select an upcoming opening."
 
             # Check new slot availability
             target_doc_id = self.resolve_doctor_id(doctor_id, slot_iso=new_slot_iso) if doctor_id else apt.doctor_id

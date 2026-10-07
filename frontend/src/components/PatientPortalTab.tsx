@@ -20,6 +20,8 @@ import {
   sendChatMessage, 
   resetChatSession, 
   fetchAvailableSlots,
+  formatClinicSlot,
+  isPastClinicSlot,
   PatientSessionState, 
   ToolCallExecution,
   ActiveAppointmentItem
@@ -64,48 +66,11 @@ const STORAGE_MESSAGES_KEY = "careloop_jay_messages_v4";
 const STORAGE_SESSION_KEY = "careloop_jay_session_v4";
 
 function formatCleanTime(isoStr?: string): string {
-  if (!isoStr || isoStr === "None") return "None";
-  if (isoStr.includes("T")) {
-    const [datePart, timePart] = isoStr.split("T");
-    const cleanTime = timePart.substring(0, 5);
-    const now = new Date();
-    const todayStr = now.toISOString().split("T")[0];
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = tomorrow.toISOString().split("T")[0];
-
-    if (datePart === todayStr) {
-      return `Today (${cleanTime})`;
-    } else if (datePart === tomorrowStr) {
-      return `Tomorrow (${cleanTime})`;
-    }
-    return `${datePart} (${cleanTime})`;
-  }
-  return isoStr;
+  return formatClinicSlot(isoStr);
 }
 
 function formatSlotDisplay(isoStr?: string): string {
-  if (!isoStr || isoStr === "None") return "None";
-  try {
-    const dt = new Date(isoStr);
-    const now = new Date();
-    const todayStr = now.toISOString().split("T")[0];
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = tomorrow.toISOString().split("T")[0];
-    const slotDateStr = isoStr.split("T")[0];
-    const timeStr = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-
-    if (slotDateStr === todayStr) {
-      return `Today at ${timeStr}`;
-    } else if (slotDateStr === tomorrowStr) {
-      return `Tomorrow at ${timeStr}`;
-    }
-    const dayName = dt.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
-    return `${dayName} at ${timeStr}`;
-  } catch (_) {
-    return isoStr;
-  }
+  return formatClinicSlot(isoStr);
 }
 
 const INITIAL_WELCOME_MESSAGE: ChatMessage = {
@@ -229,7 +194,8 @@ export const PatientPortalTab: React.FC<PatientPortalTabProps> = ({ onDatabaseCh
     if (!doc) return;
     setIsLoadingSlots(true);
     try {
-      const slots = await fetchAvailableSlots(undefined, doc.name);
+      const rawSlots = await fetchAvailableSlots(undefined, doc.name);
+      const slots = rawSlots.filter((s: any) => !isPastClinicSlot(s.start_time_iso));
       setDoctorSlots(slots);
       if (slots.length > 0) {
         setSelectedSlotIso((prev) => (slots.some((s: any) => s.start_time_iso === prev) ? prev : slots[0].start_time_iso));

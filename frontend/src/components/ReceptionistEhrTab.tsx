@@ -42,6 +42,8 @@ import {
   fetchDirectives,
   clearDirectives,
   simulateAutonomousEvolution,
+  formatClinicSlot,
+  isPastClinicSlot,
   AgentManifestItem,
   ClinicalDirectiveItem,
   EvolutionSimulateResult
@@ -174,7 +176,8 @@ export const ReceptionistEhrTab: React.FC<ReceptionistEhrTabProps> = ({ onDirect
   const loadSlotsForDoctor = async (docId: string) => {
     try {
       const doc = dbData?.doctors.find((d) => d.id === docId);
-      const slots = await fetchAvailableSlots(doc?.specialty, doc?.name);
+      const rawSlots = await fetchAvailableSlots(doc?.specialty, doc?.name);
+      const slots = rawSlots.filter((s: any) => !isPastClinicSlot(s.start_time_iso));
       setOpenSlotsForDoc(slots);
       if (slots.length > 0) {
         setWalkInSlotIso(slots[0].start_time_iso);
@@ -277,12 +280,7 @@ export const ReceptionistEhrTab: React.FC<ReceptionistEhrTabProps> = ({ onDirect
   };
 
   const cleanTime = (val: string) => {
-    if (!val) return "";
-    if (val.includes("T")) {
-      const parts = val.split("T");
-      return `${parts[0]} at ${parts[1].substring(0, 5)}`;
-    }
-    return val;
+    return formatClinicSlot(val);
   };
 
   const getImprovedScenario = (id: string): ScenarioEvaluation | undefined => {
@@ -554,14 +552,18 @@ export const ReceptionistEhrTab: React.FC<ReceptionistEhrTabProps> = ({ onDirect
                       Available Slots:
                     </span>
                     <div className="flex flex-wrap gap-1">
-                      {d.available_slots.map((s, idx) => (
-                        <span
-                          key={idx}
-                          className="px-1.5 py-0.5 rounded-md text-[10px] font-mono bg-white border border-slate-200 text-slate-700"
-                        >
-                          {s}
-                        </span>
-                      ))}
+                      {d.available_slots.filter((s) => !isPastClinicSlot(s)).length === 0 ? (
+                        <span className="text-[10px] text-slate-400 italic">No upcoming openings</span>
+                      ) : (
+                        d.available_slots.filter((s) => !isPastClinicSlot(s)).map((s, idx) => (
+                          <span
+                            key={idx}
+                            className="px-1.5 py-0.5 rounded-md text-[10px] font-mono bg-white border border-slate-200 text-slate-700"
+                          >
+                            {cleanTime(s)}
+                          </span>
+                        ))
+                      )}
                     </div>
                   </div>
                 </div>
@@ -596,7 +598,7 @@ export const ReceptionistEhrTab: React.FC<ReceptionistEhrTabProps> = ({ onDirect
                   <div key={e.id} className="p-3 rounded-xl bg-red-50/60 border border-red-200/70 space-y-1.5">
                     <div className="flex items-center justify-between">
                       <span className="font-bold text-red-900 text-xs">{e.patient_name}</span>
-                      <span className="text-[10px] font-mono text-red-700">{e.escalated_at}</span>
+                      <span className="text-[10px] font-mono text-red-700">{cleanTime(e.escalated_at)}</span>
                     </div>
                     <p className="text-xs text-red-950">
                       Reported Symptoms: <span className="font-semibold">{e.emergency_type}</span>

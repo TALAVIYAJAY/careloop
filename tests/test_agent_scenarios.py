@@ -237,7 +237,9 @@ class TestReschedulingSecurityAndTodayDates:
         assert "today" in resp2.lower() or "Patel" in resp2
 
         # Step 3: Pick time
-        resp3 = clean_agent.handle_turn(session, "3:30")
+        avail_patel = clean_agent.db.find_available_slots(doctor_id="DOC_PED_01")
+        target_slot = avail_patel[0]
+        resp3 = clean_agent.handle_turn(session, f"Please book [{target_slot.start_time_iso}]")
         assert "CONFIRMED" in resp3 or "confirmed" in resp3.lower()
         assert session.booking_status == "CONFIRMED"
         first_apt_id = session.appointment_id
@@ -267,7 +269,7 @@ class TestReschedulingSecurityAndTodayDates:
         assert "tomorrow" in resp5.lower() or final_appts[0].slot_iso != initial_slot
 
         # Verify old slot was freed back to AVAILABLE
-        old_slot_row = clean_agent.db.find_available_slots(doctor_id=initial_appts[0].doctor_id)
+        old_slot_row = clean_agent.db.find_available_slots(doctor_id=initial_appts[0].doctor_id, include_past=True)
         old_slot_isos = [s.start_time_iso for s in old_slot_row]
         assert initial_slot in old_slot_isos, "Old slot was not released back to AVAILABLE status!"
 
@@ -300,29 +302,28 @@ class TestReschedulingSecurityAndTodayDates:
         assert "slot_iso" not in sanitized
 
     def test_explicit_slot_booking_honors_selected_time_not_1130(self, clean_agent):
-        """Verifies that selecting 5:00 PM books 5:00 PM and never defaults to 11:30 AM."""
-        from datetime import date
-        today_str = date.today().isoformat()
-        slot_5pm = f"{today_str}T17:00:00Z"
+        """Verifies that selecting an explicit slot books that exact slot and never defaults to 11:30 AM."""
+        avail_patel = clean_agent.db.find_available_slots(doctor_id="DOC_PED_01")
+        target_slot_iso = avail_patel[0].start_time_iso
 
         session = PatientSession(
-            session_id="test_sess_5pm",
+            session_id="test_sess_explicit_slot",
             patient_name="Jay Talaviya",
             patient_phone="+1-555-0199",
             patient_id="PAT_JAY_001",
-            selected_slot_iso=slot_5pm,
+            selected_slot_iso=target_slot_iso,
             selected_doctor_id="DOC_PED_01",
             selected_doctor_name="Dr. Priya Patel"
         )
 
-        msg = f"Please schedule an appointment with Dr. Priya Patel for Today at 05:00 PM [{slot_5pm}] for patient Jay Talaviya."
+        msg = f"Please schedule an appointment with Dr. Priya Patel [{target_slot_iso}] for patient Jay Talaviya."
         resp = clean_agent.handle_turn(session, msg)
         assert "CONFIRMED" in resp or "confirmed" in resp.lower()
 
-        # Check DB to verify it booked 5:00 PM exactly
+        # Check DB to verify it booked target_slot_iso exactly and never 11:30
         appts = clean_agent.db.get_patient_appointments("+1-555-0199")
         assert len(appts) == 1
-        assert appts[0].slot_iso == slot_5pm, f"Expected slot {slot_5pm}, but got {appts[0].slot_iso} (11:30 fallback bug!)"
+        assert appts[0].slot_iso == target_slot_iso, f"Expected slot {target_slot_iso}, but got {appts[0].slot_iso} (11:30 fallback bug!)"
 
     def test_natural_language_evening_slot_booking_630pm_and_7pm(self, clean_agent):
         """Verifies that saying 'today at 6:30 pm' or '7:00 pm' books that exact evening slot."""
@@ -360,4 +361,20 @@ class TestReschedulingSecurityAndTodayDates:
         appts2 = clean_agent.db.get_patient_appointments("+1-555-0101")
         assert len(appts2) == 1
         assert appts2[0].slot_iso == slot_7pm, f"Expected {slot_7pm}, got {appts2[0].slot_iso}"
+
+    def test_past_slot_booking_rejected_by_agent(self, clean_agent):
+        """Verifies that an attempt to book a slot that has already passed is rejected."""
+        from datetime import datetime, timedelta
+        past_iso = (datetime.now() - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:00Z")
+        session = PatientSession(
+            session_id="test_sess_past_rejection",
+            patient_name="Late Patient",
+            patient_phone="+1-555-0199",
+            selected_slot_iso=past_iso,
+            selected_doctor_id="DOC_PED_01"
+        )
+        resp = clean_agent.handle_turn(session, f"Please book appointment at [{past_iso}]")
+        assert session.booking_status != "CONFIRMED"
+        assert "passed" in resp.lower() or "not available" in resp.lower() or "upcoming" in resp.lower() or "could not be booked" in resp.lower()
+
 

@@ -765,6 +765,18 @@ class ClinicAgent:
         if iso_match:
             explicit_iso = iso_match.group(0)
 
+        if explicit_iso and self.db.is_past_slot(explicit_iso):
+            avail_future = self.db.find_available_slots(doctor_id=doc_id) if doc_id else self.db.find_available_slots()
+            bullets = "\n".join([f"• **{self._format_friendly_slot(s.start_time_iso)}**" for s in avail_future[:4]])
+            reply = (
+                f"⚠️ **Booking Could Not Be Completed**\n\n"
+                f"Cannot book appointment: the requested slot ({self._format_friendly_slot(explicit_iso)}) has already passed.\n\n"
+                f"Here are upcoming available openings:\n{bullets}\n\n"
+                f"Please select an upcoming opening to confirm your booking."
+            )
+            session.add_message(role="model", content=reply)
+            return reply
+
         if explicit_iso:
             for s in avail_slots:
                 if s.start_time_iso.startswith(explicit_iso[:16]):
@@ -804,7 +816,7 @@ class ClinicAgent:
                         f"{h24}:{m:02d}",
                     ]
                     if m == 0:
-                        candidates.extend([f"{h12}", f"{h24}", f"{h12} o'clock", f"{h12}oclock"])
+                        candidates.extend([f"{h12} o'clock", f"{h12}oclock"])
 
                     norm_candidates = [re.sub(r'[\s:.-]+', '', c) for c in candidates]
 
@@ -819,7 +831,7 @@ class ClinicAgent:
 
         # B. Check date or relative keywords if no exact time matched
         if not matched_slot:
-            if any(w in lowered for w in ["earliest", "first available", "first slot", "soonest", "any time", "any", "first"]):
+            if any(w in lowered for w in ["earliest", "first available", "first slot", "soonest", "any time", "first opening"]):
                 matched_slot = avail_slots[0]
             elif "latest" in lowered:
                 matched_slot = avail_slots[-1]
@@ -943,6 +955,19 @@ class ClinicAgent:
                     session_id=session.session_id,
                     doctor_id=matched_slot.doctor_id
                 )
+                if res.get("status") == "RESCHEDULE_FAILED" or "error" in res:
+                    err_msg = res.get("error", "The requested appointment could not be rescheduled.")
+                    avail_future = self.db.find_available_slots(doctor_id=matched_slot.doctor_id)
+                    bullets = "\n".join([f"• **{self._format_friendly_slot(s.start_time_iso)}**" for s in avail_future[:4]])
+                    reply = (
+                        f"⚠️ **Reschedule Request Could Not Be Completed**\n\n"
+                        f"{err_msg}\n\n"
+                        f"Here are upcoming available openings:\n{bullets}\n\n"
+                        f"Please select one of the open upcoming slots to reschedule."
+                    )
+                    session.add_message(role="model", content=reply)
+                    return reply
+
                 session.booking_status = "CONFIRMED"
                 session.appointment_id = target_apt_id
                 session.selected_slot_iso = matched_slot.start_time_iso
@@ -978,6 +1003,18 @@ class ClinicAgent:
                     reason="Routine consultation",
                     session_id=session.session_id
                 )
+                if book_res.get("status") == "BOOKING_FAILED" or "error" in book_res:
+                    err_msg = book_res.get("error", "The requested appointment slot could not be booked.")
+                    avail_future = self.db.find_available_slots(doctor_id=matched_slot.doctor_id)
+                    bullets = "\n".join([f"• **{self._format_friendly_slot(s.start_time_iso)}**" for s in avail_future[:4]])
+                    reply = (
+                        f"⚠️ **Booking Could Not Be Completed**\n\n"
+                        f"{err_msg}\n\n"
+                        f"Here are upcoming available openings:\n{bullets}\n\n"
+                        f"Please select an upcoming opening to confirm your booking."
+                    )
+                    session.add_message(role="model", content=reply)
+                    return reply
                 session.booking_status = "CONFIRMED"
                 session.pending_action = None
                 session.reschedule_target_id = None
@@ -1197,6 +1234,18 @@ class ClinicAgent:
             elif "jenkins" in lowered or "cardio" in lowered:
                 target_doc_id = "DOC_CARD_01"
 
+            if target_iso and self.db.is_past_slot(target_iso):
+                avail_future = self.db.find_available_slots(doctor_id=target_doc_id) if target_doc_id else self.db.find_available_slots()
+                bullets = "\n".join([f"• **{self._format_friendly_slot(s.start_time_iso)}**" for s in avail_future[:4]])
+                reply = (
+                    f"⚠️ **Booking Could Not Be Completed**\n\n"
+                    f"Cannot book appointment: the requested slot ({self._format_friendly_slot(target_iso)}) has already passed.\n\n"
+                    f"Here are upcoming available openings:\n{bullets}\n\n"
+                    f"Please select an upcoming opening to confirm your booking."
+                )
+                session.add_message(role="model", content=reply)
+                return reply
+
             avail_for_booking = self.db.find_available_slots(doctor_id=target_doc_id) if target_doc_id else self.db.find_available_slots()
 
             matched_booking_slot = None
@@ -1224,7 +1273,7 @@ class ClinicAgent:
                         ampm = "am" if dt.hour < 12 else "pm"
                         cands = [f"{h12}:{m:02d}", f"{h12}:{m:02d}{ampm}", f"{h12}:{m:02d} {ampm}", f"{h12}{ampm}", f"{h24}:{m:02d}"]
                         if m == 0:
-                            cands.extend([f"{h12}", f"{h24}"])
+                            cands.extend([f"{h12} o'clock", f"{h12}oclock"])
                         for c in cands:
                             c_norm = re.sub(r'[\s:.-]+', '', c)
                             if c in lowered or c_norm in norm_input:
@@ -1246,6 +1295,19 @@ class ClinicAgent:
                     reason="Outpatient consultation",
                     session_id=session.session_id
                 )
+                if book_res.get("status") == "BOOKING_FAILED" or "error" in book_res:
+                    err_msg = book_res.get("error", "The requested appointment slot could not be booked.")
+                    avail_future = self.db.find_available_slots(doctor_id=matched_booking_slot.doctor_id)
+                    bullets = "\n".join([f"• **{self._format_friendly_slot(s.start_time_iso)}**" for s in avail_future[:4]])
+                    reply = (
+                        f"⚠️ **Booking Could Not Be Completed**\n\n"
+                        f"{err_msg}\n\n"
+                        f"Here are upcoming available openings:\n{bullets}\n\n"
+                        f"Please select an upcoming opening to confirm your booking."
+                    )
+                    session.add_message(role="model", content=reply)
+                    return reply
+
                 session.booking_status = "CONFIRMED"
                 session.pending_action = None
                 session.reschedule_target_id = None
@@ -1456,10 +1518,11 @@ class ClinicAgent:
             )
             if res.get("status") == "RESCHEDULE_FAILED":
                 err_msg = res.get("error", "Security verification failed.")
+                header = "REQUESTED TIME HAS ALREADY PASSED" if "already passed" in err_msg.lower() else "SECURITY VERIFICATION FAILED"
                 msg = (
-                    f"⚠️ **RESCHEDULE REJECTED - SECURITY VERIFICATION FAILED**\n\n"
+                    f"⚠️ **RESCHEDULE REJECTED - {header}**\n\n"
                     f"{err_msg}\n\n"
-                    f"*For HIPAA compliance and patient privacy, appointments can only be rescheduled with verified patient credentials matching our medical records.*"
+                    f"*Appointments can only be rescheduled to upcoming available openings with verified patient credentials matching our medical records.*"
                 )
                 session.add_message(
                     role="model",

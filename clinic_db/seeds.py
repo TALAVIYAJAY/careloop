@@ -194,6 +194,42 @@ def generate_slots_seed() -> List[Dict[str, Any]]:
             "status": "AVAILABLE"
         },
         {
+            "id": "SLOT_TODAY_CARD_05",
+            "doctor_id": "DOC_CARD_01",
+            "doctor_name": "Dr. Sarah Jenkins",
+            "specialty": "Cardiology",
+            "start_time_iso": f"{today_str}T19:30:00Z",
+            "end_time_iso": f"{today_str}T20:00:00Z",
+            "status": "AVAILABLE"
+        },
+        {
+            "id": "SLOT_TODAY_CARD_06",
+            "doctor_id": "DOC_CARD_01",
+            "doctor_name": "Dr. Sarah Jenkins",
+            "specialty": "Cardiology",
+            "start_time_iso": f"{today_str}T20:00:00Z",
+            "end_time_iso": f"{today_str}T20:30:00Z",
+            "status": "AVAILABLE"
+        },
+        {
+            "id": "SLOT_TODAY_CARD_07",
+            "doctor_id": "DOC_CARD_01",
+            "doctor_name": "Dr. Sarah Jenkins",
+            "specialty": "Cardiology",
+            "start_time_iso": f"{today_str}T20:30:00Z",
+            "end_time_iso": f"{today_str}T21:00:00Z",
+            "status": "AVAILABLE"
+        },
+        {
+            "id": "SLOT_TODAY_CARD_08",
+            "doctor_id": "DOC_CARD_01",
+            "doctor_name": "Dr. Sarah Jenkins",
+            "specialty": "Cardiology",
+            "start_time_iso": f"{today_str}T21:00:00Z",
+            "end_time_iso": f"{today_str}T21:30:00Z",
+            "status": "AVAILABLE"
+        },
+        {
             "id": "SLOT_TOMORROW_CARD_01",
             "doctor_id": "DOC_CARD_01",
             "doctor_name": "Dr. Sarah Jenkins",
@@ -247,6 +283,42 @@ def generate_slots_seed() -> List[Dict[str, Any]]:
             "specialty": "Dermatology",
             "start_time_iso": f"{today_str}T18:30:00Z",
             "end_time_iso": f"{today_str}T19:00:00Z",
+            "status": "AVAILABLE"
+        },
+        {
+            "id": "SLOT_TODAY_DERM_05",
+            "doctor_id": "DOC_DERM_01",
+            "doctor_name": "Dr. Michael Chen",
+            "specialty": "Dermatology",
+            "start_time_iso": f"{today_str}T19:30:00Z",
+            "end_time_iso": f"{today_str}T20:00:00Z",
+            "status": "AVAILABLE"
+        },
+        {
+            "id": "SLOT_TODAY_DERM_06",
+            "doctor_id": "DOC_DERM_01",
+            "doctor_name": "Dr. Michael Chen",
+            "specialty": "Dermatology",
+            "start_time_iso": f"{today_str}T20:00:00Z",
+            "end_time_iso": f"{today_str}T20:30:00Z",
+            "status": "AVAILABLE"
+        },
+        {
+            "id": "SLOT_TODAY_DERM_07",
+            "doctor_id": "DOC_DERM_01",
+            "doctor_name": "Dr. Michael Chen",
+            "specialty": "Dermatology",
+            "start_time_iso": f"{today_str}T20:30:00Z",
+            "end_time_iso": f"{today_str}T21:00:00Z",
+            "status": "AVAILABLE"
+        },
+        {
+            "id": "SLOT_TODAY_DERM_08",
+            "doctor_id": "DOC_DERM_01",
+            "doctor_name": "Dr. Michael Chen",
+            "specialty": "Dermatology",
+            "start_time_iso": f"{today_str}T21:00:00Z",
+            "end_time_iso": f"{today_str}T21:30:00Z",
             "status": "AVAILABLE"
         },
         {
@@ -315,6 +387,42 @@ def generate_slots_seed() -> List[Dict[str, Any]]:
             "status": "AVAILABLE"
         },
         {
+            "id": "SLOT_TODAY_PED_06",
+            "doctor_id": "DOC_PED_01",
+            "doctor_name": "Dr. Priya Patel",
+            "specialty": "Pediatrics",
+            "start_time_iso": f"{today_str}T19:30:00Z",
+            "end_time_iso": f"{today_str}T20:00:00Z",
+            "status": "AVAILABLE"
+        },
+        {
+            "id": "SLOT_TODAY_PED_07",
+            "doctor_id": "DOC_PED_01",
+            "doctor_name": "Dr. Priya Patel",
+            "specialty": "Pediatrics",
+            "start_time_iso": f"{today_str}T20:00:00Z",
+            "end_time_iso": f"{today_str}T20:30:00Z",
+            "status": "AVAILABLE"
+        },
+        {
+            "id": "SLOT_TODAY_PED_08",
+            "doctor_id": "DOC_PED_01",
+            "doctor_name": "Dr. Priya Patel",
+            "specialty": "Pediatrics",
+            "start_time_iso": f"{today_str}T20:30:00Z",
+            "end_time_iso": f"{today_str}T21:00:00Z",
+            "status": "AVAILABLE"
+        },
+        {
+            "id": "SLOT_TODAY_PED_09",
+            "doctor_id": "DOC_PED_01",
+            "doctor_name": "Dr. Priya Patel",
+            "specialty": "Pediatrics",
+            "start_time_iso": f"{today_str}T21:00:00Z",
+            "end_time_iso": f"{today_str}T21:30:00Z",
+            "status": "AVAILABLE"
+        },
+        {
             "id": "SLOT_TOMORROW_PED_01",
             "doctor_id": "DOC_PED_01",
             "doctor_name": "Dr. Priya Patel",
@@ -377,6 +485,42 @@ def generate_slots_seed() -> List[Dict[str, Any]]:
             "specialty": "Orthopedics",
             "start_time_iso": f"{today_str}T19:00:00Z",
             "end_time_iso": f"{today_str}T19:30:00Z",
+            "status": "AVAILABLE"
+        },
+        {
+            "id": "SLOT_TODAY_ORTH_05",
+            "doctor_id": "DOC_ORTH_01",
+            "doctor_name": "Dr. Robert Martinez",
+            "specialty": "Orthopedics",
+            "start_time_iso": f"{today_str}T19:30:00Z",
+            "end_time_iso": f"{today_str}T20:00:00Z",
+            "status": "AVAILABLE"
+        },
+        {
+            "id": "SLOT_TODAY_ORTH_06",
+            "doctor_id": "DOC_ORTH_01",
+            "doctor_name": "Dr. Robert Martinez",
+            "specialty": "Orthopedics",
+            "start_time_iso": f"{today_str}T20:00:00Z",
+            "end_time_iso": f"{today_str}T20:30:00Z",
+            "status": "AVAILABLE"
+        },
+        {
+            "id": "SLOT_TODAY_ORTH_07",
+            "doctor_id": "DOC_ORTH_01",
+            "doctor_name": "Dr. Robert Martinez",
+            "specialty": "Orthopedics",
+            "start_time_iso": f"{today_str}T20:30:00Z",
+            "end_time_iso": f"{today_str}T21:00:00Z",
+            "status": "AVAILABLE"
+        },
+        {
+            "id": "SLOT_TODAY_ORTH_08",
+            "doctor_id": "DOC_ORTH_01",
+            "doctor_name": "Dr. Robert Martinez",
+            "specialty": "Orthopedics",
+            "start_time_iso": f"{today_str}T21:00:00Z",
+            "end_time_iso": f"{today_str}T21:30:00Z",
             "status": "AVAILABLE"
         },
         {

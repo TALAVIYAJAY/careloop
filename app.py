@@ -314,7 +314,7 @@ async def get_database_state():
     doctors = []
     for d in doctors_raw:
         slots = db.find_available_slots(doctor_id=d.id)
-        slot_times = [s.start_time_iso.split("T")[-1][:5] if "T" in s.start_time_iso else s.start_time_iso for s in slots]
+        slot_times = [s.start_time_iso for s in slots]
         doctors.append({
             "id": d.id,
             "name": d.name,
@@ -404,7 +404,8 @@ async def register_walk_in_appointment(req: WalkInBookingRequest):
         session_id="walk-in-front-desk"
     )
     if not appt:
-        raise HTTPException(status_code=409, detail=err or "Requested slot is already booked or unavailable.")
+        status_code = 400 if (err and "already passed" in err.lower()) else 409
+        raise HTTPException(status_code=status_code, detail=err or "Requested slot is already booked or unavailable.")
 
     return {
         "status": "success",

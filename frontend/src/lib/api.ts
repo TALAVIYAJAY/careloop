@@ -336,3 +336,79 @@ export async function simulateAutonomousEvolution(): Promise<EvolutionSimulateRe
   return res.json();
 }
 
+/**
+ * Uniformly formats any ISO slot string into consistent 12-hour IST time display.
+ * Prevents browser timezone shifts and guarantees identical formatting across
+ * Patient Portal, Chat Ledger, Walk-In modal, and Front Desk EHR.
+ * Example outputs: "Today at 06:30 PM", "Tomorrow at 02:00 PM", "Thu, Oct 15 at 10:00 AM".
+ */
+export function formatClinicSlot(isoStr?: string): string {
+  if (!isoStr || isoStr === "None" || isoStr === "null") return "None";
+  try {
+    if (isoStr.includes("T")) {
+      const [datePart, rawTime] = isoStr.split("T");
+      const cleanTime = rawTime.replace("Z", "");
+      const [hStr, mStr] = cleanTime.split(":");
+      const hour = parseInt(hStr, 10);
+      const minute = mStr ? mStr.substring(0, 2) : "00";
+      const ampm = hour >= 12 ? "PM" : "AM";
+      const hour12 = hour % 12 || 12;
+      const formattedTime = `${hour12.toString().padStart(2, "0")}:${minute} ${ampm}`;
+
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, "0");
+      const d = String(now.getDate()).padStart(2, "0");
+      const todayStr = `${y}-${m}-${d}`;
+
+      const tomDate = new Date(now);
+      tomDate.setDate(tomDate.getDate() + 1);
+      const tomY = tomDate.getFullYear();
+      const tomM = String(tomDate.getMonth() + 1).padStart(2, "0");
+      const tomD = String(tomDate.getDate()).padStart(2, "0");
+      const tomorrowStr = `${tomY}-${tomM}-${tomD}`;
+
+      if (datePart === todayStr) {
+        return `Today at ${formattedTime}`;
+      } else if (datePart === tomorrowStr) {
+        return `Tomorrow at ${formattedTime}`;
+      } else {
+        const [slotY, slotM, slotD] = datePart.split("-").map(Number);
+        const slotDate = new Date(slotY, slotM - 1, slotD);
+        const dayLabel = slotDate.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+        return `${dayLabel} at ${formattedTime}`;
+      }
+    }
+    if (!isoStr.includes("T") && isoStr.includes(":")) {
+      const [hStr, mStr] = isoStr.split(":");
+      const hour = parseInt(hStr, 10);
+      const minute = mStr ? mStr.substring(0, 2) : "00";
+      const ampm = hour >= 12 ? "PM" : "AM";
+      const hour12 = hour % 12 || 12;
+      return `${hour12.toString().padStart(2, "0")}:${minute} ${ampm}`;
+    }
+  } catch (_) {}
+  return isoStr;
+}
+
+/**
+ * Checks whether an ISO slot timestamp is in the past relative to current local time.
+ */
+export function isPastClinicSlot(isoStr?: string): boolean {
+  if (!isoStr || isoStr === "None" || isoStr === "null") return false;
+  try {
+    if (isoStr.includes("T")) {
+      const [datePart, rawTime] = isoStr.split("T");
+      const cleanTime = rawTime.replace("Z", "");
+      const [hStr, mStr, sStr] = cleanTime.split(":");
+      const [year, month, day] = datePart.split("-").map(Number);
+      const hour = parseInt(hStr, 10);
+      const minute = parseInt(mStr || "0", 10);
+      const second = parseInt(sStr || "0", 10);
+      const slotDate = new Date(year, month - 1, day, hour, minute, second);
+      return slotDate.getTime() <= Date.now();
+    }
+  } catch (_) {}
+  return false;
+}
+
