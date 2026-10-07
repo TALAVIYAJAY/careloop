@@ -206,10 +206,23 @@ RELATIVE TIME & DATE RESOLUTION RULES:
 ================================================================================
 - "today" -> match slots whose date is {today_str}.
 - "tomorrow" -> match slots whose date is the calendar day after today.
-- "11:30" / "11:30 AM" / "3:30" / "03:30 PM" / "2:00 PM" -> match the exact slot time from the schedule.
+- "11:30" / "11:30 AM" / "3:30" / "03:30 PM" / "5:00 PM" / "2:00 PM" -> match the exact slot time from the schedule.
 - "morning" -> slots before 12:00 PM.
 - "afternoon" -> slots after 12:00 PM.
 - "earliest" / "first available" -> the very first chronologically available slot.
+"""
+
+    if getattr(session, "selected_slot_iso", None):
+        target_iso = session.selected_slot_iso
+        target_doc = getattr(session, "selected_doctor_name", "the selected physician")
+        prompt += f"""
+================================================================================
+EXPLICIT PATIENT SELECTION (USER CHOSEN SLOT VIA CONSOLE):
+================================================================================
+The patient has explicitly chosen:
+• Target Slot ISO: "{target_iso}"
+• Target Physician: "{target_doc}"
+When booking or rescheduling, you MUST execute the tool call with slot_iso="{target_iso}".
 """
 
     if dynamic_directives and len(dynamic_directives) > 0:

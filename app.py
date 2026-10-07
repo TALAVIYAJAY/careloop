@@ -334,6 +334,7 @@ async def get_database_state():
             "doctor_id": a.doctor_id,
             "specialty": a.specialty,
             "slot_time": a.slot_iso,
+            "slot_iso": a.slot_iso,
             "status": a.status,
             "visit_type": a.visit_type or "ROUTINE"
         })

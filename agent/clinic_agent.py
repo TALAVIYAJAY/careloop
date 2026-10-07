@@ -180,7 +180,6 @@ class ClinicAgent:
             except Exception as e:
                 err_str = str(e)
                 if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-                    import re
                     delay = 1800.0
                     match = re.search(r"retryDelay': '(\d+)s", err_str)
                     if match:
@@ -331,6 +330,14 @@ class ClinicAgent:
 
                 if call_name == "book_appointment":
                     raw_doc_id = tool_args.get("doctor_id")
+                    # If an explicit slot was chosen via UI or contained in user text, ensure it is honored
+                    iso_in_msg = re.search(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', user_input)
+                    if iso_in_msg:
+                        iso_found = iso_in_msg.group(0)
+                        tool_args["slot_iso"] = iso_found + "Z" if not iso_found.endswith("Z") else iso_found
+                    elif session.selected_slot_iso:
+                        tool_args["slot_iso"] = session.selected_slot_iso
+
                     slot_iso = tool_args.get("slot_iso")
                     resolved_doc_id = self.db.resolve_doctor_id(raw_doc_id, slot_iso=slot_iso)
                     if resolved_doc_id:
@@ -339,6 +346,12 @@ class ClinicAgent:
                 if call_name == "reschedule_appointment":
                     if not tool_args.get("appointment_id") and session.appointment_id:
                         tool_args["appointment_id"] = session.appointment_id
+                    iso_in_msg = re.search(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', user_input)
+                    if iso_in_msg:
+                        iso_found = iso_in_msg.group(0)
+                        tool_args["new_slot_iso"] = iso_found + "Z" if not iso_found.endswith("Z") else iso_found
+                    elif session.selected_slot_iso:
+                        tool_args["new_slot_iso"] = session.selected_slot_iso
                     if tool_args.get("doctor_id"):
                         tool_args["doctor_id"] = self.db.resolve_doctor_id(tool_args.get("doctor_id"), slot_iso=tool_args.get("new_slot_iso"))
 
@@ -450,7 +463,6 @@ class ClinicAgent:
                             session.booking_status = "SLOT_SELECTION"
                         session.selected_doctor_id = slots[0].get("doctor_id")
                         session.selected_doctor_name = slots[0].get("doctor_name")
-                        session.selected_slot_iso = slots[0].get("start_time_iso")
                         session.identified_specialty = slots[0].get("specialty")
 
                 tool_response_parts.append(
@@ -747,26 +759,53 @@ class ClinicAgent:
         need_time_slots = []
         date_label = ""
 
-        # A0. Exact ISO or ID match in user text
-        for s in avail_slots:
-            if s.start_time_iso.lower() in lowered or s.id.lower() in lowered:
-                matched_slot = s
-                break
+        # Priority 0: Explicit ISO match in user text
+        explicit_iso = None
+        iso_match = re.search(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', user_input)
+        if iso_match:
+            explicit_iso = iso_match.group(0)
 
-        # A. Check normalized time match across available slots
+        if explicit_iso:
+            for s in avail_slots:
+                if s.start_time_iso.startswith(explicit_iso[:16]):
+                    matched_slot = s
+                    break
+            if not matched_slot:
+                for s in self.db.find_available_slots():
+                    if s.start_time_iso.startswith(explicit_iso[:16]):
+                        matched_slot = s
+                        break
+
+        # A0. Exact ISO or ID match in user text
+        if not matched_slot:
+            for s in avail_slots:
+                if s.start_time_iso.lower() in lowered or s.id.lower() in lowered:
+                    matched_slot = s
+                    break
+
+        # A. Check normalized time match across available slots (supporting 12h & 24h: 5pm, 5:00, 17:00, etc.)
         if not matched_slot:
             for s in avail_slots:
                 try:
                     dt = datetime.fromisoformat(s.start_time_iso.replace("Z", "+00:00"))
                     h12 = dt.hour if dt.hour <= 12 else dt.hour - 12
+                    if h12 == 0:
+                        h12 = 12
+                    h24 = dt.hour
                     m = dt.minute
                     ampm = "am" if dt.hour < 12 else "pm"
 
                     candidates = [
                         f"{h12}:{m:02d}",
                         f"{h12}:{m:02d}{ampm}",
+                        f"{h12}:{m:02d} {ampm}",
                         f"{h12}{ampm}",
+                        f"{h12} {ampm}",
+                        f"{h24}:{m:02d}",
                     ]
+                    if m == 0:
+                        candidates.extend([f"{h12}", f"{h24}", f"{h12} o'clock", f"{h12}oclock"])
+
                     norm_candidates = [re.sub(r'[\s:.-]+', '', c) for c in candidates]
 
                     for cand, norm_c in zip(candidates, norm_candidates):
@@ -789,7 +828,14 @@ class ClinicAgent:
                 if not today_slots:
                     earliest_date = avail_slots[0].start_time_iso[:10]
                     today_slots = [s for s in avail_slots if s.start_time_iso.startswith(earliest_date)]
-                if len(today_slots) == 1:
+                is_resched_intent = (
+                    session.pending_action == "RESCHEDULE"
+                    or bool(session.reschedule_target_id)
+                    or any(m.role == "user" and self._is_reschedule_intent(m.content) for m in session.messages[-3:])
+                )
+                if is_resched_intent and today_slots:
+                    matched_slot = today_slots[0]
+                elif len(today_slots) == 1:
                     matched_slot = today_slots[0]
                 elif len(today_slots) > 1:
                     need_time_slots = today_slots
@@ -800,7 +846,14 @@ class ClinicAgent:
                     unique_dates = sorted(list({s.start_time_iso[:10] for s in avail_slots}))
                     if len(unique_dates) > 1:
                         tomorrow_slots = [s for s in avail_slots if s.start_time_iso.startswith(unique_dates[1])]
-                if len(tomorrow_slots) == 1:
+                is_resched_intent = (
+                    session.pending_action == "RESCHEDULE"
+                    or bool(session.reschedule_target_id)
+                    or any(m.role == "user" and self._is_reschedule_intent(m.content) for m in session.messages[-3:])
+                )
+                if is_resched_intent and tomorrow_slots:
+                    matched_slot = tomorrow_slots[0]
+                elif len(tomorrow_slots) == 1:
                     matched_slot = tomorrow_slots[0]
                 elif len(tomorrow_slots) > 1:
                     need_time_slots = tomorrow_slots
@@ -822,8 +875,10 @@ class ClinicAgent:
             elif any(w in lowered for w in ["yes", "confirm", "book", "that works", "works", "sure", "great", "ok", "okay", "please book", "book it", "sounds good", "fine", "proceed"]):
                 if session.selected_slot_iso:
                     target_iso = session.selected_slot_iso
-                    matched_slot = next((s for s in avail_slots if s.start_time_iso == target_iso), avail_slots[0])
-                else:
+                    matched_slot = next((s for s in avail_slots if s.start_time_iso.startswith(target_iso[:16])), None)
+                    if not matched_slot:
+                        matched_slot = next((s for s in self.db.find_available_slots() if s.start_time_iso.startswith(target_iso[:16])), None)
+                if not matched_slot:
                     matched_slot = avail_slots[0]
             else:
                 for weekday in ["monday", "tuesday", "wednesday", "thursday", "friday"]:
@@ -1114,11 +1169,120 @@ class ClinicAgent:
             )
             return msg
 
+        # 4b. Direct Explicit Booking Dispatch (from 1-Click console or explicit scheduling commands)
+        is_direct_book_cmd = (
+            any(phrase in lowered for phrase in [
+                "please schedule an appointment", "please book an appointment", "schedule an appointment with",
+                "book an appointment with", "schedule appointment with", "book slot", "book an appointment for",
+                "please schedule", "please book", "book appointment", "schedule an appointment"
+            ])
+            and not self._is_reschedule_intent(lowered)
+            and not self._is_cancel_intent(lowered)
+        )
+        if is_direct_book_cmd:
+            target_iso = None
+            iso_match = re.search(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', user_input)
+            if iso_match:
+                target_iso = iso_match.group(0)
+            elif session.selected_slot_iso:
+                target_iso = session.selected_slot_iso
+
+            target_doc_id = session.selected_doctor_id
+            if "patel" in lowered or "peds" in lowered or "pediatric" in lowered:
+                target_doc_id = "DOC_PED_01"
+            elif "chen" in lowered or "derm" in lowered:
+                target_doc_id = "DOC_DERM_01"
+            elif "martinez" in lowered or "ortho" in lowered:
+                target_doc_id = "DOC_ORTH_01"
+            elif "jenkins" in lowered or "cardio" in lowered:
+                target_doc_id = "DOC_CARD_01"
+
+            avail_for_booking = self.db.find_available_slots(doctor_id=target_doc_id) if target_doc_id else self.db.find_available_slots()
+
+            matched_booking_slot = None
+            if target_iso:
+                for s in avail_for_booking:
+                    if s.start_time_iso.startswith(target_iso[:16]):
+                        matched_booking_slot = s
+                        break
+                if not matched_booking_slot:
+                    for s in self.db.find_available_slots():
+                        if s.start_time_iso.startswith(target_iso[:16]):
+                            matched_booking_slot = s
+                            break
+
+            if not matched_booking_slot:
+                norm_input = re.sub(r'[\s:.-]+', '', lowered)
+                for s in avail_for_booking:
+                    try:
+                        dt = datetime.fromisoformat(s.start_time_iso.replace("Z", "+00:00"))
+                        h12 = dt.hour if dt.hour <= 12 else dt.hour - 12
+                        if h12 == 0:
+                            h12 = 12
+                        h24 = dt.hour
+                        m = dt.minute
+                        ampm = "am" if dt.hour < 12 else "pm"
+                        cands = [f"{h12}:{m:02d}", f"{h12}:{m:02d}{ampm}", f"{h12}:{m:02d} {ampm}", f"{h12}{ampm}", f"{h24}:{m:02d}"]
+                        if m == 0:
+                            cands.extend([f"{h12}", f"{h24}"])
+                        for c in cands:
+                            c_norm = re.sub(r'[\s:.-]+', '', c)
+                            if c in lowered or c_norm in norm_input:
+                                matched_booking_slot = s
+                                break
+                        if matched_booking_slot:
+                            break
+                    except Exception:
+                        continue
+
+            if matched_booking_slot:
+                caller_name = session.patient_name or "Jay Talaviya"
+                caller_phone = session.patient_phone or "+1-555-0199"
+                book_res = self.tool_dispatcher.book_appointment(
+                    patient_name=caller_name,
+                    patient_phone=caller_phone,
+                    doctor_id=matched_booking_slot.doctor_id,
+                    slot_iso=matched_booking_slot.start_time_iso,
+                    reason="Outpatient consultation",
+                    session_id=session.session_id
+                )
+                session.booking_status = "CONFIRMED"
+                session.pending_action = None
+                session.reschedule_target_id = None
+                session.patient_name = caller_name
+                session.patient_phone = caller_phone
+                session.selected_doctor_id = matched_booking_slot.doctor_id
+                session.selected_doctor_name = matched_booking_slot.doctor_name
+                session.selected_slot_iso = matched_booking_slot.start_time_iso
+
+                appt_dict = book_res.get("appointment", {})
+                session.appointment_id = appt_dict.get("id") or "APT_CONFIRMED"
+                session.patient_id = appt_dict.get("patient_id") or session.patient_id
+                session.add_appointment(appt_dict)
+
+                friendly_time = self._format_friendly_slot(matched_booking_slot.start_time_iso)
+                suite_str = getattr(matched_booking_slot, "suite", getattr(matched_booking_slot, "room_number", "Suite 110"))
+                msg = (
+                    "✅ **APPOINTMENT BOOKING CONFIRMED**\n\n"
+                    f"• **Status:** Confirmed in Clinic EHR\n"
+                    f"• **Confirmation ID:** {session.appointment_id}\n"
+                    f"• **Physician:** {matched_booking_slot.doctor_name} ({matched_booking_slot.specialty}, {suite_str})\n"
+                    f"• **Date & Time:** {friendly_time}\n"
+                    f"• **Patient:** {caller_name} ({caller_phone})\n\n"
+                    "Please arrive 15 minutes prior to your appointment with your photo ID and insurance card."
+                )
+                session.add_message(
+                    role="model",
+                    content=msg,
+                    tool_calls=[{"name": "book_appointment", "args": {"doctor_id": matched_booking_slot.doctor_id, "patient_name": caller_name, "slot_iso": matched_booking_slot.start_time_iso}}],
+                    tool_responses=[{"name": "book_appointment", "output": book_res}]
+                )
+                return msg
+
         # 5. Reschedule request
         has_reschedule_directive = any("reschedule" in d.lower() or "slot" in d.lower() for d in self.dynamic_directives)
         if self._is_reschedule_intent(lowered) or "apt_" in lowered:
             target_apt_id = session.appointment_id or "APT_ORTH_101"
-            import re
             apt_match = re.search(r"apt_[a-z0-9_]+", lowered)
             if apt_match:
                 target_apt_id = apt_match.group(0).upper()
@@ -1208,10 +1372,29 @@ class ClinicAgent:
             avail_reschedule = self.db.find_available_slots(doctor_id=doc_id_to_search) if doc_id_to_search else self.db.find_available_slots()
 
             matched_reschedule_slot = None
-            for s in avail_reschedule:
-                if s.start_time_iso.lower() in lowered or s.id.lower() in lowered:
-                    matched_reschedule_slot = s
-                    break
+            target_resched_iso = None
+            iso_match = re.search(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', user_input)
+            if iso_match:
+                target_resched_iso = iso_match.group(0)
+            elif session.selected_slot_iso:
+                target_resched_iso = session.selected_slot_iso
+
+            if target_resched_iso:
+                for s in avail_reschedule:
+                    if s.start_time_iso.startswith(target_resched_iso[:16]):
+                        matched_reschedule_slot = s
+                        break
+                if not matched_reschedule_slot:
+                    for s in self.db.find_available_slots():
+                        if s.start_time_iso.startswith(target_resched_iso[:16]):
+                            matched_reschedule_slot = s
+                            break
+
+            if not matched_reschedule_slot:
+                for s in avail_reschedule:
+                    if s.start_time_iso.lower() in lowered or s.id.lower() in lowered:
+                        matched_reschedule_slot = s
+                        break
 
             if not matched_reschedule_slot:
                 norm_input = re.sub(r'[\s:.-]+', '', lowered)
@@ -1338,8 +1521,6 @@ class ClinicAgent:
             session.identified_specialty = "Dermatology"
             session.selected_doctor_id = "DOC_DERM_01"
             session.selected_doctor_name = "Dr. Michael Chen"
-            if slots:
-                session.selected_slot_iso = slots[0].get("start_time_iso")
 
             slot_lines = []
             for s in slots[:3]:
@@ -1368,8 +1549,6 @@ class ClinicAgent:
             session.identified_specialty = "Orthopedics"
             session.selected_doctor_id = "DOC_ORTH_01"
             session.selected_doctor_name = "Dr. Robert Martinez"
-            if slots:
-                session.selected_slot_iso = slots[0].get("start_time_iso")
 
             slot_lines = []
             for s in slots[:3]:
@@ -1398,7 +1577,8 @@ class ClinicAgent:
             session.identified_specialty = "Cardiology"
             session.selected_doctor_id = "DOC_CARD_01"
             session.selected_doctor_name = "Dr. Sarah Jenkins"
-            session.selected_slot_iso = "2026-10-13T10:30:00Z"
+            if not session.selected_slot_iso:
+                session.selected_slot_iso = "2026-10-13T10:30:00Z"
             msg = (
                 "Dr. Sarah Jenkins is fully booked on **Monday, October 12** due to scheduled cardiovascular procedures.\n\n"
                 "However, she has an available opening on:\n"
@@ -1425,8 +1605,6 @@ class ClinicAgent:
             session.identified_specialty = "Pediatrics"
             session.selected_doctor_id = "DOC_PED_01"
             session.selected_doctor_name = "Dr. Priya Patel"
-            if slots:
-                session.selected_slot_iso = slots[0].get("start_time_iso")
 
             slot_lines = []
             for s in slots[:3]:
@@ -1519,7 +1697,6 @@ class ClinicAgent:
         """Strips internal system identifiers, ISO brackets, and tool artifact tags from patient-facing text."""
         if not text:
             return text
-        import re
         # Remove [ISO: 2026-10-07T11:30:00Z] or (ISO: ...) or [tool slot_iso: ...] or [slot_iso: ...]
         text = re.sub(r'\s*\[(?:tool\s+)?slot_iso:\s*[^\]]+\]', '', text, flags=re.IGNORECASE)
         text = re.sub(r'\s*\[ISO:\s*[^\]]+\]', '', text, flags=re.IGNORECASE)

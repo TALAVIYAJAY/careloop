@@ -198,3 +198,31 @@ class TestApiChatAndEndpoints:
         appts_after = db_res_after.json().get("appointments", [])
         target_appt = next(a for a in appts_after if a["id"] == appt_id)
         assert target_appt["status"] == "CANCELLED"
+
+    def test_api_chat_frontend_slot_booking_evening(self, client):
+        from datetime import date
+        today_iso = date.today().isoformat()
+        slot_5pm = f"{today_iso}T17:00:00Z"
+
+        payload = {
+            "session_id": "api_test_5pm_frontend",
+            "message": f"Please schedule an appointment with Dr. Priya Patel for Today at 05:00 PM [{slot_5pm}] for patient Jay Talaviya.",
+            "patient_name": "Jay Talaviya",
+            "patient_phone": "+1-555-0199",
+            "patient_id": "PAT_JAY_001",
+            "slot_iso": slot_5pm,
+            "doctor_id": "DOC_PED_01",
+            "doctor_name": "Dr. Priya Patel"
+        }
+        resp = client.post("/api/chat", json=payload)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "CONFIRMED" in data["response"] or "confirmed" in data["response"].lower()
+        assert data["session"]["selected_slot"] == slot_5pm
+
+        # Verify directly in SQLite DB
+        db_res = client.get("/api/database")
+        appts = db_res.json().get("appointments", [])
+        my_appt = [a for a in appts if a.get("patient_name") == "Jay Talaviya"]
+        assert len(my_appt) >= 1
+        assert my_appt[-1]["slot_iso"] == slot_5pm

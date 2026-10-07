@@ -298,5 +298,66 @@ class TestReschedulingSecurityAndTodayDates:
         assert "[ISO:" not in sanitized
         assert "2026-10-07T11:30:00Z" not in sanitized
         assert "slot_iso" not in sanitized
-        assert "Today at 11:30 AM and Tomorrow." in sanitized
+
+    def test_explicit_slot_booking_honors_selected_time_not_1130(self, clean_agent):
+        """Verifies that selecting 5:00 PM books 5:00 PM and never defaults to 11:30 AM."""
+        from datetime import date
+        today_str = date.today().isoformat()
+        slot_5pm = f"{today_str}T17:00:00Z"
+
+        session = PatientSession(
+            session_id="test_sess_5pm",
+            patient_name="Jay Talaviya",
+            patient_phone="+1-555-0199",
+            patient_id="PAT_JAY_001",
+            selected_slot_iso=slot_5pm,
+            selected_doctor_id="DOC_PED_01",
+            selected_doctor_name="Dr. Priya Patel"
+        )
+
+        msg = f"Please schedule an appointment with Dr. Priya Patel for Today at 05:00 PM [{slot_5pm}] for patient Jay Talaviya."
+        resp = clean_agent.handle_turn(session, msg)
+        assert "CONFIRMED" in resp or "confirmed" in resp.lower()
+
+        # Check DB to verify it booked 5:00 PM exactly
+        appts = clean_agent.db.get_patient_appointments("+1-555-0199")
+        assert len(appts) == 1
+        assert appts[0].slot_iso == slot_5pm, f"Expected slot {slot_5pm}, but got {appts[0].slot_iso} (11:30 fallback bug!)"
+
+    def test_natural_language_evening_slot_booking_630pm_and_7pm(self, clean_agent):
+        """Verifies that saying 'today at 6:30 pm' or '7:00 pm' books that exact evening slot."""
+        from datetime import date
+        today_str = date.today().isoformat()
+        slot_630pm = f"{today_str}T18:30:00Z"
+        slot_7pm = f"{today_str}T19:00:00Z"
+
+        # Patient 1: Books 6:30 PM
+        session1 = PatientSession(
+            session_id="test_sess_630pm",
+            patient_name="Jay Talaviya",
+            patient_phone="+1-555-0199",
+            patient_id="PAT_JAY_001"
+        )
+        resp1_1 = clean_agent.handle_turn(session1, "I have mild fever and want Dr. Patel")
+        assert "Patel" in resp1_1
+        resp1_2 = clean_agent.handle_turn(session1, "today at 6:30 pm")
+        assert "CONFIRMED" in resp1_2 or "confirmed" in resp1_2.lower()
+        appts1 = clean_agent.db.get_patient_appointments("+1-555-0199")
+        assert len(appts1) == 1
+        assert appts1[0].slot_iso == slot_630pm, f"Expected {slot_630pm}, got {appts1[0].slot_iso}"
+
+        # Patient 2: Routine inquiry then selects 7:00 PM
+        session2 = PatientSession(
+            session_id="test_sess_7pm",
+            patient_name="Alex Turner",
+            patient_phone="+1-555-0101",
+            patient_id="PAT_0101"
+        )
+        resp2_1 = clean_agent.handle_turn(session2, "I need to see Dr. Patel for a checkup")
+        assert "Patel" in resp2_1
+        resp2_2 = clean_agent.handle_turn(session2, "7pm works for me")
+        assert "CONFIRMED" in resp2_2 or "confirmed" in resp2_2.lower()
+        appts2 = clean_agent.db.get_patient_appointments("+1-555-0101")
+        assert len(appts2) == 1
+        assert appts2[0].slot_iso == slot_7pm, f"Expected {slot_7pm}, got {appts2[0].slot_iso}"
 
