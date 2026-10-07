@@ -325,8 +325,10 @@ class TestReschedulingSecurityAndTodayDates:
         assert len(appts) == 1
         assert appts[0].slot_iso == target_slot_iso, f"Expected slot {target_slot_iso}, but got {appts[0].slot_iso} (11:30 fallback bug!)"
 
-    def test_natural_language_evening_slot_booking_630pm_and_7pm(self, clean_agent):
+    def test_natural_language_evening_slot_booking_630pm_and_7pm(self, clean_agent, monkeypatch):
         """Verifies that saying 'today at 6:30 pm' or '7:00 pm' books that exact evening slot."""
+        # Simulate daytime execution so evening slots remain bookable 24/7 regardless of test run time
+        monkeypatch.setattr(clean_agent.db, "is_past_slot", lambda s, ref_dt=None: False)
         from datetime import date
         today_str = date.today().isoformat()
         slot_630pm = f"{today_str}T18:30:00Z"

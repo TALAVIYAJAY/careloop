@@ -4,7 +4,7 @@
 > Built with Python 3.10+, Google Gemini 3.5 Flash-Lite, Pydantic, and SQLite.
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-43%20Passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-49%20Passing-brightgreen.svg)]()
 [![Model](https://img.shields.io/badge/LLM-Gemini%203.5%20Flash--Lite-orange.svg)]()
 [![Architecture](https://img.shields.io/badge/Architecture-Dual--Layer%20Closed--Loop-success.svg)](DOCUMENTATION.md)
 
