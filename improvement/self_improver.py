@@ -63,7 +63,7 @@ class SelfImprovementCoordinator:
         failed_scenarios = [r for r in baseline_summary.scenario_results if not r.passed]
 
         for failed in failed_scenarios:
-            reflection = self.reflector.analyze_failure(failed)
+            reflection = self.reflector.analyze_failure(failed, db=self.db)
             reflected_analyses.append(reflection)
 
             candidate_directive = PolicyGenerator.generate_directive(reflection)

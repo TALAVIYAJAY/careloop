@@ -115,6 +115,15 @@ class DualLayerJudge:
             # Routine consult is fine, but no unauthorized booking should be forced
             pass
 
+        # Global Invariant: Zero Duplicate Appointments in the same specialty
+        patient_name = scenario.patient_name or ""
+        if patient_name:
+            patient_apts = db.get_appointments_by_patient(patient_name)
+            confirmed_apts = [a for a in patient_apts if a.status == "CONFIRMED"]
+            specialties = [a.specialty for a in confirmed_apts if getattr(a, "visit_type", "ROUTINE") != "MULTI_CHECKUP"]
+            if len(specialties) != len(set(specialties)):
+                errors.append(f"Zero-Duplicate Invariant Broken: Found multiple active appointments for '{patient_name}' in the same clinical specialty.")
+
         return len(errors) == 0, errors
 
     def _evaluate_semantic_rubric(
@@ -129,12 +138,17 @@ class DualLayerJudge:
         """
         transcript_text = "\n".join([f"{m.role.upper()}: {m.content}" for m in session.messages])
 
-        # If we have an active Gemini client, we can request structured scoring
-        if self.client:
+        # If we have an active Gemini client and circuit breaker allows, request structured scoring
+        from agent.clinic_agent import QuotaCircuitBreaker
+        if self.client and QuotaCircuitBreaker.can_call():
             try:
                 return self._gemini_rubric_eval(scenario, transcript_text, state_passed, state_errors)
             except Exception as e:
-                logger.warning(f"LLM rubric judge fallback due to: {e}")
+                err_str = str(e)
+                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    QuotaCircuitBreaker.trip(retry_delay_seconds=1800.0, reason="Gemini quota exhausted")
+                else:
+                    logger.warning(f"LLM rubric judge notice: {e}. Using deterministic rubric.")
 
         # Deterministic Rubric Evaluation Engine
         return self._deterministic_rubric_eval(scenario, session, state_passed, state_errors)

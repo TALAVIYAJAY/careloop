@@ -81,6 +81,11 @@ class TriageSubAgent:
                 metadata={"reason": gr.reason, "triage_id": triage_res.get("triage_event", {}).get("id")}
             )
 
+        # If current turn is not an emergency, clear the emergency flag and resume routine intake
+        session.emergency_flag = False
+        if session.booking_status == "ESCALATED":
+            session.booking_status = "INTAKE"
+
         return SubAgentExecutionResult(
             handled=False,
             agent_name=self.name,

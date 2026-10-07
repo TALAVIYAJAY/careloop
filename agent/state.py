@@ -25,6 +25,8 @@ class PatientSession(BaseModel):
     emergency_flag: bool = False
     emergency_details: Optional[str] = None
     booking_status: str = "INTAKE"  # INTAKE | NEGOTIATING | CONFIRMED | ESCALATED | CANCELLED
+    pending_action: Optional[str] = None  # None | "RESCHEDULE" | "BOOK" | "CANCEL"
+    reschedule_target_id: Optional[str] = None
     messages: List[ChatMessage] = Field(default_factory=list)
     turn_count: int = 0
     metadata: Dict[str, Any] = Field(default_factory=dict)
@@ -37,6 +39,8 @@ class PatientSession(BaseModel):
         self.selected_slot_iso = appt_dict.get("slot_iso")
         self.selected_doctor_name = appt_dict.get("doctor_name")
         self.booking_status = "CONFIRMED"
+        self.pending_action = None
+        self.reschedule_target_id = None
 
     def update_appointment_slot(self, appt_id: str, new_slot_iso: str) -> None:
         for a in self.active_appointments:
@@ -45,6 +49,9 @@ class PatientSession(BaseModel):
                 a["status"] = "CONFIRMED"
         self.appointment_id = appt_id
         self.selected_slot_iso = new_slot_iso
+        self.booking_status = "CONFIRMED"
+        self.pending_action = None
+        self.reschedule_target_id = None
 
     def add_message(self, role: str, content: str, tool_calls=None, tool_responses=None) -> None:
         self.messages.append(ChatMessage(

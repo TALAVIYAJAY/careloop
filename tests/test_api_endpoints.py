@@ -5,6 +5,10 @@ from app import app
 
 @pytest.fixture
 def client():
+    from app import app, agent, orchestrator
+    agent.client = None
+    if hasattr(orchestrator, "receptionist_agent"):
+        orchestrator.receptionist_agent.client = None
     c = TestClient(app)
     # Ensure database is clean before tests run
     c.post("/api/database/reset")

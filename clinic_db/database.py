@@ -271,6 +271,58 @@ class ClinicDatabase:
             rows = cursor.fetchall()
             return [Doctor(**dict(r)) for r in rows]
 
+    DOCTOR_ID_ALIASES = {
+        "DOC_PEDS_01": "DOC_PED_01",
+        "DOC_PED_01": "DOC_PED_01",
+        "DOC_DERMATOLOGY_01": "DOC_DERM_01",
+        "DOC_DERM_01": "DOC_DERM_01",
+        "DOC_ORTHO_01": "DOC_ORTH_01",
+        "DOC_ORTH_01": "DOC_ORTH_01",
+        "DOC_CARDIO_01": "DOC_CARD_01",
+        "DOC_CARD_01": "DOC_CARD_01",
+        "PATEL": "DOC_PED_01",
+        "CHEN": "DOC_DERM_01",
+        "MARTINEZ": "DOC_ORTH_01",
+        "JENKINS": "DOC_CARD_01",
+    }
+
+    def resolve_doctor_id(self, doctor_id: Optional[str], slot_iso: Optional[str] = None) -> Optional[str]:
+        """Resolves doctor ID from canonical aliases, slot ISO association, or name lookup."""
+        if not doctor_id and not slot_iso:
+            return None
+
+        clean_doc_id = str(doctor_id).strip() if doctor_id else ""
+        if clean_doc_id.upper() in self.DOCTOR_ID_ALIASES:
+            return self.DOCTOR_ID_ALIASES[clean_doc_id.upper()]
+
+        with self._conn_context() as conn:
+            cursor = conn.cursor()
+            # 1. Exact match in doctors table
+            if clean_doc_id:
+                cursor.execute("SELECT id FROM doctors WHERE id = ?", (clean_doc_id,))
+                row = cursor.fetchone()
+                if row:
+                    return row["id"]
+
+            # 2. Match from slot_iso directly if provided
+            if slot_iso:
+                cursor.execute("SELECT doctor_id FROM slots WHERE start_time_iso = ? LIMIT 1", (slot_iso,))
+                row = cursor.fetchone()
+                if row:
+                    return row["doctor_id"]
+
+            # 3. Match from doctor name or specialty substring
+            if clean_doc_id:
+                cursor.execute(
+                    "SELECT id FROM doctors WHERE LOWER(name) LIKE ? OR LOWER(specialty) LIKE ? LIMIT 1",
+                    (f"%{clean_doc_id.lower()}%", f"%{clean_doc_id.lower()}%")
+                )
+                row = cursor.fetchone()
+                if row:
+                    return row["id"]
+
+        return clean_doc_id or None
+
     def find_available_slots(
         self,
         specialty: Optional[str] = None,
@@ -286,6 +338,9 @@ class ClinicDatabase:
             query += " AND LOWER(specialty) LIKE ?"
             params.append(f"%{specialty.lower()}%")
         if doctor_id:
+            resolved_doc_id = self.resolve_doctor_id(doctor_id)
+            if resolved_doc_id:
+                doctor_id = resolved_doc_id
             query += " AND doctor_id = ?"
             params.append(doctor_id)
         if doctor_name:
@@ -337,11 +392,25 @@ class ClinicDatabase:
         else:
             self.get_or_create_patient(patient_name, patient_phone)
 
+        # Resolve doctor ID from aliases or slot ISO
+        resolved_doc_id = self.resolve_doctor_id(doctor_id, slot_iso=slot_iso)
+        if resolved_doc_id:
+            doctor_id = resolved_doc_id
+
         with self._conn_context() as conn:
             cursor = conn.cursor()
             # 1. Check if doctor exists
             cursor.execute("SELECT * FROM doctors WHERE id = ?", (doctor_id,))
             doc_row = cursor.fetchone()
+            if not doc_row and slot_iso:
+                # Fallback: check if slot exists for any doctor
+                cursor.execute("SELECT doctor_id FROM slots WHERE start_time_iso = ? LIMIT 1", (slot_iso,))
+                s_row = cursor.fetchone()
+                if s_row:
+                    doctor_id = s_row["doctor_id"]
+                    cursor.execute("SELECT * FROM doctors WHERE id = ?", (doctor_id,))
+                    doc_row = cursor.fetchone()
+
             if not doc_row:
                 return None, f"Doctor ID '{doctor_id}' does not exist in clinic registry."
 
@@ -353,6 +422,18 @@ class ClinicDatabase:
                 (doctor_id, slot_iso)
             )
             slot_row = cursor.fetchone()
+            if not slot_row and slot_iso:
+                # Check if slot exists with another doctor at that same start_time_iso
+                cursor.execute("SELECT * FROM slots WHERE start_time_iso = ? LIMIT 1", (slot_iso,))
+                alt_slot = cursor.fetchone()
+                if alt_slot:
+                    doctor_id = alt_slot["doctor_id"]
+                    slot_row = alt_slot
+                    cursor.execute("SELECT * FROM doctors WHERE id = ?", (doctor_id,))
+                    doc_row = cursor.fetchone()
+                    if doc_row:
+                        doctor = Doctor(**dict(doc_row))
+
             if not slot_row:
                 return None, f"No slot found for {doctor.name} at {slot_iso}."
 
@@ -430,14 +511,14 @@ class ClinicDatabase:
                     return None, f"SECURITY AUTHENTICATION REQUIRED: To reschedule appointment '{appointment_id}' across sessions, patient full name must be provided for verification."
 
             # Check new slot availability
-            target_doc_id = doctor_id or apt.doctor_id
+            target_doc_id = self.resolve_doctor_id(doctor_id, slot_iso=new_slot_iso) if doctor_id else apt.doctor_id
             cursor.execute(
                 "SELECT * FROM slots WHERE doctor_id = ? AND start_time_iso = ? AND status = 'AVAILABLE'",
                 (target_doc_id, new_slot_iso)
             )
             new_slot_row = cursor.fetchone()
-            if not new_slot_row and not doctor_id:
-                # If doctor wasn't specified, check if any doctor has this slot open
+            if not new_slot_row:
+                # If doctor wasn't specified or mismatched, check if any doctor has this slot open
                 cursor.execute(
                     "SELECT * FROM slots WHERE start_time_iso = ? AND status = 'AVAILABLE'",
                     (new_slot_iso,)
@@ -474,6 +555,16 @@ class ClinicDatabase:
             cursor.execute("SELECT * FROM appointments WHERE id = ?", (appointment_id,))
             updated_row = cursor.fetchone()
             return Appointment(**dict(updated_row)), None
+
+    def get_appointment(self, appointment_id: str) -> Optional[Appointment]:
+        """Retrieves a single appointment by its unique confirmation ID."""
+        with self._conn_context() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM appointments WHERE id = ?", (appointment_id,))
+            row = cursor.fetchone()
+            if row:
+                return Appointment(**dict(row))
+            return None
 
     def cancel_appointment(self, appointment_id: str) -> bool:
         """Cancels an appointment and frees up the associated slot."""

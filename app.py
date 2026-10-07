@@ -72,10 +72,19 @@ if (FRONTEND_OUT / "_next").exists():
 class ChatMessageRequest(BaseModel):
     session_id: str
     message: str
+    patient_name: Optional[str] = "Jay Talaviya"
+    patient_phone: Optional[str] = "+1-555-0199"
+    patient_id: Optional[str] = "PAT_JAY_001"
+    slot_iso: Optional[str] = None
+    doctor_id: Optional[str] = None
+    doctor_name: Optional[str] = None
 
 
 class SessionResetRequest(BaseModel):
     session_id: str
+    patient_name: Optional[str] = "Jay Talaviya"
+    patient_phone: Optional[str] = "+1-555-0199"
+    patient_id: Optional[str] = "PAT_JAY_001"
 
 
 # =====================================================================
@@ -120,12 +129,48 @@ async def chat_with_agent(req: ChatMessageRequest):
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
-    session = sessions.setdefault(req.session_id, PatientSession(session_id=req.session_id))
+    session = sessions.get(req.session_id)
+    if not session:
+        session = PatientSession(
+            session_id=req.session_id,
+            patient_name=req.patient_name or "Jay Talaviya",
+            patient_phone=req.patient_phone or "+1-555-0199",
+            patient_id=req.patient_id or "PAT_JAY_001"
+        )
+        sessions[req.session_id] = session
+    else:
+        if not session.patient_name:
+            session.patient_name = req.patient_name or "Jay Talaviya"
+        if not session.patient_phone:
+            session.patient_phone = req.patient_phone or "+1-555-0199"
+        if not session.patient_id:
+            session.patient_id = req.patient_id or "PAT_JAY_001"
+
+    # Propagate explicit slot/doctor selections if specified
+    if req.slot_iso:
+        session.selected_slot_iso = req.slot_iso
+    if req.doctor_id:
+        session.selected_doctor_id = req.doctor_id
+    if req.doctor_name:
+        session.selected_doctor_name = req.doctor_name
+
+    # Synchronize active appointments with true database state before turn
+    if session.patient_id:
+        db_appts = db.get_patient_appointments(session.patient_id)
+        session.active_appointments = [a.model_dump() for a in db_appts]
+        if db_appts and not session.appointment_id:
+            session.appointment_id = db_appts[-1].id
 
     # Keep orchestrator and agent synced with current clinical directives
     active_directives = store.get_prompt_strings()
     orchestrator.update_directives(active_directives)
     agent.update_directives(active_directives)
+
+    # Auto-extract patient name from message if provided
+    for known_caller in ["Alex Rivera", "Jay Talaviya", "Jay", "Alex Turner", "Maria Garcia", "Robert Hayes", "David Miller", "Elena Rostova", "Emma Davis"]:
+        if known_caller.lower() in req.message.lower():
+            session.patient_name = known_caller
+            break
 
     # Execute conversational turn through Hierarchical Clinical Orchestrator
     response_text = orchestrator.process_turn(session, req.message)
@@ -151,12 +196,14 @@ async def chat_with_agent(req: ChatMessageRequest):
                     "result": call_res
                 })
 
-    # Auto-extract patient name from message if provided and not yet stored
-    if not session.patient_name:
-        for known_caller in ["Alex Turner", "Maria Garcia", "Robert Hayes", "David Miller", "Elena Rostova", "Emma Davis"]:
-            if known_caller.lower() in req.message.lower():
-                session.patient_name = known_caller
-                break
+    # Synchronize active appointments with true database state after tool execution
+    if session.patient_id:
+        db_appts = db.get_patient_appointments(session.patient_id)
+        session.active_appointments = [a.model_dump() for a in db_appts]
+        if db_appts:
+            session.appointment_id = db_appts[-1].id
+            session.selected_slot_iso = db_appts[-1].slot_iso
+            session.selected_doctor_name = db_appts[-1].doctor_name
 
     triage_str = "EMERGENCY_ESCALATED" if session.emergency_flag else (
         "CONFIRMED" if session.booking_status == "CONFIRMED" else "ROUTINE"
@@ -165,9 +212,9 @@ async def chat_with_agent(req: ChatMessageRequest):
     return {
         "response": response_text,
         "session": {
-            "patient_name": session.patient_name or "Anonymous",
-            "patient_phone": session.patient_phone or "",
-            "patient_id": session.patient_id or "",
+            "patient_name": session.patient_name or "Jay Talaviya",
+            "patient_phone": session.patient_phone or "+1-555-0199",
+            "patient_id": session.patient_id or "PAT_JAY_001",
             "active_doctor_name": session.selected_doctor_name or "None Selected",
             "selected_slot": session.selected_slot_iso or "None",
             "appointment_id": session.appointment_id or "",
@@ -183,7 +230,12 @@ async def chat_with_agent(req: ChatMessageRequest):
 
 @app.post("/api/chat/reset")
 async def reset_chat_session(req: SessionResetRequest):
-    sessions[req.session_id] = PatientSession(session_id=req.session_id)
+    sessions[req.session_id] = PatientSession(
+        session_id=req.session_id,
+        patient_name=req.patient_name or "Jay Talaviya",
+        patient_phone=req.patient_phone or "+1-555-0199",
+        patient_id=req.patient_id or "PAT_JAY_001"
+    )
     return {"status": "ok", "session_id": req.session_id}
 
 
@@ -319,8 +371,14 @@ async def get_database_state():
 
 @app.post("/api/database/reset")
 async def reset_database():
+    global _cached_evaluation_result
     db.reset_database()
-    return {"status": "ok", "message": "Database reset to clean seeds"}
+    sessions.clear()
+    store.clear()
+    _cached_evaluation_result = None
+    agent.update_directives([])
+    orchestrator.update_directives([])
+    return {"status": "ok", "message": "Database, chat sessions, and learned policies reset to clean seeds"}
 
 
 class WalkInBookingRequest(BaseModel):

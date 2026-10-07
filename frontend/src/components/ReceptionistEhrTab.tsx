@@ -49,9 +49,10 @@ import {
 
 interface ReceptionistEhrTabProps {
   onDirectivesUpdated?: () => void;
+  dbVersion?: number;
 }
 
-export const ReceptionistEhrTab: React.FC<ReceptionistEhrTabProps> = ({ onDirectivesUpdated }) => {
+export const ReceptionistEhrTab: React.FC<ReceptionistEhrTabProps> = ({ onDirectivesUpdated, dbVersion }) => {
   const [activeSection, setActiveSection] = useState<"appointments" | "doctors" | "triage" | "agents" | "improver">("appointments");
   const [dbData, setDbData] = useState<DatabaseState | null>(null);
   const [isLoadingDb, setIsLoadingDb] = useState(false);
@@ -155,6 +156,20 @@ export const ReceptionistEhrTab: React.FC<ReceptionistEhrTabProps> = ({ onDirect
     loadDirectives();
   }, []);
 
+  useEffect(() => {
+    loadDb();
+  }, [dbVersion]);
+
+  useEffect(() => {
+    const handleDbSync = () => {
+      loadDb();
+    };
+    window.addEventListener("careloop:db-sync", handleDbSync);
+    return () => {
+      window.removeEventListener("careloop:db-sync", handleDbSync);
+    };
+  }, []);
+
   // When opening modal or changing doctor, fetch open slots for that doctor
   const loadSlotsForDoctor = async (docId: string) => {
     try {
@@ -229,14 +244,33 @@ export const ReceptionistEhrTab: React.FC<ReceptionistEhrTabProps> = ({ onDirect
   };
 
   const handleResetDb = async () => {
-    if (!window.confirm("Reset Clinic EHR database back to clean baseline seed data?")) return;
+    if (!window.confirm("⚠️ COMPLETE SYSTEM FACTORY RESET\n\nThis will completely erase all data:\n• Reseed EHR Database (appointments, slots, logs back to clean baseline)\n• Erase all patient chat messages, history & sessions\n• Clear learned clinical directives back to baseline\n• Erase all local browser chat storage\n\nProceed with complete reset?")) return;
     setIsResettingDb(true);
     try {
       await resetDatabaseSeeds();
+      if (typeof window !== "undefined") {
+        try {
+          // Thoroughly delete all patient chat storage keys
+          localStorage.removeItem("careloop_jay_messages_v4");
+          localStorage.removeItem("careloop_jay_session_v4");
+          localStorage.removeItem("careloop_jay_threads_v3");
+          localStorage.removeItem("careloop_jay_active_thread_v3");
+          Object.keys(localStorage).forEach((key) => {
+            if (key.startsWith("careloop_") && key !== "careloop_active_tab") {
+              localStorage.removeItem(key);
+            }
+          });
+          // Dispatch global system reset event to clear active Patient Portal state
+          window.dispatchEvent(new Event("careloop:complete-system-reset"));
+        } catch (_) {}
+      }
       await loadDb();
+      await loadAgents();
+      await loadDirectives();
       if (onDirectivesUpdated) onDirectivesUpdated();
+      alert("✅ Complete System Reset Successful!\n\nAll EHR database records, patient chat conversations, and browser storage have been erased and restored to clean initial baseline.");
     } catch (err: any) {
-      alert("Failed to reset database: " + err.message);
+      alert("Failed to reset system: " + err.message);
     } finally {
       setIsResettingDb(false);
     }
@@ -317,10 +351,11 @@ export const ReceptionistEhrTab: React.FC<ReceptionistEhrTabProps> = ({ onDirect
           <button
             onClick={handleResetDb}
             disabled={isResettingDb}
-            className="px-2 py-1 text-xs font-semibold rounded-lg bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 flex items-center space-x-1 transition disabled:opacity-50"
+            title="Complete System Factory Reset: Erases all chat data, re-seeds EHR database, and clears all storage."
+            className="px-2.5 py-1 text-xs font-bold rounded-lg bg-red-600 hover:bg-red-700 text-white flex items-center space-x-1 transition disabled:opacity-50 shadow-2xs"
           >
             <Trash2 className="w-3 h-3" />
-            <span>Reset</span>
+            <span>{isResettingDb ? "Resetting..." : "Complete System Reset"}</span>
           </button>
         </div>
       </div>
@@ -454,6 +489,7 @@ export const ReceptionistEhrTab: React.FC<ReceptionistEhrTabProps> = ({ onDirect
                             <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${
                               a.status === "CONFIRMED" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
                               a.status === "RESCHEDULED" ? "bg-blue-50 text-blue-700 border border-blue-200" :
+                              a.status === "CANCELLED" ? "bg-rose-50 text-rose-700 border border-rose-200 line-through" :
                               "bg-slate-100 text-slate-600 border border-slate-200"
                             }`}>
                               {a.status}
@@ -466,13 +502,17 @@ export const ReceptionistEhrTab: React.FC<ReceptionistEhrTabProps> = ({ onDirect
                           </div>
                         </td>
                         <td className="p-2.5 pr-4 text-right">
-                          <button
-                            onClick={() => handleCancelAppt(a.id)}
-                            title="Cancel Appointment"
-                            className="px-2 py-0.5 text-[11px] font-semibold text-red-600 hover:bg-red-50 rounded-lg transition border border-transparent hover:border-red-200"
-                          >
-                            Cancel
-                          </button>
+                          {a.status === "CANCELLED" ? (
+                            <span className="text-[10px] font-medium text-rose-500 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">Slot Released</span>
+                          ) : (
+                            <button
+                              onClick={() => handleCancelAppt(a.id)}
+                              title="Cancel Appointment"
+                              className="px-2 py-0.5 text-[11px] font-semibold text-red-600 hover:bg-red-50 rounded-lg transition border border-transparent hover:border-red-200"
+                            >
+                              Cancel
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}

@@ -8,8 +8,21 @@ import { DesignNoteTab } from "@/components/DesignNoteTab";
 import { fetchSystemStatus } from "@/lib/api";
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<"patient" | "receptionist" | "design">("patient");
+  const [activeTab, setActiveTab] = useState<"patient" | "receptionist" | "design">(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("careloop_active_tab");
+        if (saved === "receptionist" || saved === "design" || saved === "patient") {
+          return saved;
+        }
+      } catch (e) {
+        console.warn("Could not load activeTab from localStorage:", e);
+      }
+    }
+    return "patient";
+  });
   const [directivesCount, setDirectivesCount] = useState<number>(0);
+  const [dbVersion, setDbVersion] = useState<number>(0);
 
   const loadStatus = async () => {
     try {
@@ -20,8 +33,24 @@ export default function Home() {
     }
   };
 
-  useEffect(() => {
+  const handleDatabaseChange = () => {
+    setDbVersion((v) => v + 1);
     loadStatus();
+  };
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("careloop_active_tab", activeTab);
+      } catch (e) {
+        console.warn("Could not save activeTab to localStorage:", e);
+      }
+    }
+    loadStatus();
+    if (activeTab === "receptionist") {
+      // Auto-sync EHR database whenever switching to front desk
+      setDbVersion((v) => v + 1);
+    }
   }, [activeTab]);
 
   return (
@@ -33,9 +62,15 @@ export default function Home() {
       />
 
       <main className="flex-1 min-h-0 max-w-7xl w-full mx-auto px-3 sm:px-4 py-2 sm:py-2.5 flex flex-col overflow-hidden">
-        {activeTab === "patient" && <PatientPortalTab onDatabaseChange={loadStatus} />}
-        {activeTab === "receptionist" && <ReceptionistEhrTab onDirectivesUpdated={loadStatus} />}
-        {activeTab === "design" && <DesignNoteTab />}
+        <div className={`h-full flex flex-col overflow-hidden ${activeTab === "patient" ? "" : "hidden"}`}>
+          <PatientPortalTab onDatabaseChange={handleDatabaseChange} />
+        </div>
+        <div className={`h-full flex flex-col overflow-hidden ${activeTab === "receptionist" ? "" : "hidden"}`}>
+          <ReceptionistEhrTab onDirectivesUpdated={loadStatus} dbVersion={dbVersion} />
+        </div>
+        <div className={`h-full flex flex-col overflow-hidden ${activeTab === "design" ? "" : "hidden"}`}>
+          <DesignNoteTab />
+        </div>
       </main>
     </div>
   );

@@ -16,19 +16,24 @@ class ClinicToolDispatcher:
         self,
         specialty: Optional[str] = None,
         doctor_name: Optional[str] = None,
-        date_str: Optional[str] = None
+        date_str: Optional[str] = None,
+        doctor_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Search available clinic appointment slots by medical specialty, doctor name, or date (YYYY-MM-DD)."""
+        if doctor_id:
+            doctor_id = self.db.resolve_doctor_id(doctor_id)
         slots = self.db.find_available_slots(
             specialty=specialty,
             doctor_name=doctor_name,
+            doctor_id=doctor_id,
             date_str=date_str
         )
         if not slots and date_str:
             # Check if doctor or specialty has slots on other upcoming dates
             other_date_slots = self.db.find_available_slots(
                 specialty=specialty,
-                doctor_name=doctor_name
+                doctor_name=doctor_name,
+                doctor_id=doctor_id
             )
             if other_date_slots:
                 return {
@@ -88,6 +93,10 @@ class ClinicToolDispatcher:
         patient_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Atomically books a confirmed appointment slot for a patient, linking to their Master Patient ID."""
+        resolved_doc_id = self.db.resolve_doctor_id(doctor_id, slot_iso=slot_iso)
+        if resolved_doc_id:
+            doctor_id = resolved_doc_id
+
         appointment, err = self.db.book_slot_atomic(
             patient_name=patient_name,
             patient_phone=patient_phone,
@@ -120,6 +129,9 @@ class ClinicToolDispatcher:
         doctor_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Reschedules an existing appointment to a new available slot with security verification."""
+        if doctor_id:
+            doctor_id = self.db.resolve_doctor_id(doctor_id, slot_iso=new_slot_iso)
+
         appointment, err = self.db.reschedule_appointment_atomic(
             appointment_id=appointment_id,
             new_slot_iso=new_slot_iso,
@@ -138,6 +150,26 @@ class ClinicToolDispatcher:
             "status": "SUCCESS",
             "message": "Appointment successfully rescheduled.",
             "appointment": appointment.model_dump()
+        }
+
+    def cancel_appointment(
+        self,
+        appointment_id: str,
+        patient_name: Optional[str] = None,
+        patient_phone: Optional[str] = None,
+        session_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Cancels an existing appointment and releases the associated slot."""
+        success = self.db.cancel_appointment(appointment_id)
+        if not success:
+            return {
+                "status": "CANCEL_FAILED",
+                "error": f"Appointment '{appointment_id}' could not be found or is already cancelled."
+            }
+        return {
+            "status": "SUCCESS",
+            "message": f"Appointment '{appointment_id}' has been cancelled successfully and the slot is released.",
+            "appointment_id": appointment_id
         }
 
     def trigger_emergency_escalation(
@@ -167,6 +199,7 @@ class ClinicToolDispatcher:
             return self.search_available_slots(
                 specialty=arguments.get("specialty"),
                 doctor_name=arguments.get("doctor_name"),
+                doctor_id=arguments.get("doctor_id"),
                 date_str=arguments.get("date_str")
             )
         elif tool_name == "get_or_create_patient":
@@ -194,6 +227,13 @@ class ClinicToolDispatcher:
                 appointment_id=arguments.get("appointment_id", ""),
                 new_slot_iso=arguments.get("new_slot_iso", ""),
                 doctor_id=arguments.get("doctor_id"),
+                patient_name=arguments.get("patient_name"),
+                patient_phone=arguments.get("patient_phone"),
+                session_id=session_id or arguments.get("session_id")
+            )
+        elif tool_name == "cancel_appointment":
+            return self.cancel_appointment(
+                appointment_id=arguments.get("appointment_id", ""),
                 patient_name=arguments.get("patient_name"),
                 patient_phone=arguments.get("patient_phone"),
                 session_id=session_id or arguments.get("session_id")
@@ -328,8 +368,26 @@ CLINIC_TOOLS_DECLARATIONS = [
         }
     },
     {
+        "name": "cancel_appointment",
+        "description": "Cancels an existing confirmed appointment by its appointment ID, releasing the slot back to available in clinic schedule.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "appointment_id": {
+                    "type": "STRING",
+                    "description": "Unique ID of the appointment to cancel (e.g. 'APT_9E97E528' or 'APT_ORTH_101')."
+                },
+                "patient_name": {
+                    "type": "STRING",
+                    "description": "Patient full name for cancellation record."
+                }
+            },
+            "required": ["appointment_id"]
+        }
+    },
+    {
         "name": "trigger_emergency_escalation",
-        "description": "CRITICAL: Call this tool immediately if patient presents with life-threatening symptoms (chest pain, shortness of breath, stroke, severe trauma). Immediately halts routine scheduling.",
+        "description": "CRITICAL EMERGENCY ONLY: Call this tool ONLY for acute life-threatening medical emergencies (e.g. crushing chest pain, difficulty breathing, suspected stroke, severe trauma/uncontrolled bleeding, loss of consciousness). STRICTLY FORBIDDEN FOR ROUTINE ILLNESS: Do NOT call this tool for low fever, mild fever, cold, cough, runny nose, sore throat, mild rash, stomach ache, headache, or routine checkups; for low fever or cold, schedule an outpatient appointment with Dr. Priya Patel in Pediatrics/Primary Care instead.",
         "parameters": {
             "type": "OBJECT",
             "properties": {

@@ -213,3 +213,90 @@ class TestReschedulingSecurityAndTodayDates:
         assert owner_session.booking_status == "CONFIRMED"
         assert owner_session.appointment_id == "APT_ORTH_101"
 
+    def test_multi_turn_reschedule_preserves_single_appointment_zero_duplicates(self, clean_agent):
+        """
+        Tests the exact user flow:
+        1. Book Dr. Patel (Pediatrics) for today at 3:30 PM.
+        2. Ask 'i want to reshedule' (typo test).
+        3. Say 'tomorrow'.
+        4. Assert that ONLY 1 appointment exists in EHR and it is atomically moved, with ZERO duplicates!
+        """
+        session = PatientSession(
+            session_id="SESS_JAY_LIVE_TEST",
+            patient_name="Jay Talaviya",
+            patient_phone="+1-555-0199",
+            patient_id="PAT_15550199"
+        )
+
+        # Step 1: Routine complaint
+        resp1 = clean_agent.handle_turn(session, "i am having normal fever - low")
+        assert "Patel" in resp1 or "available" in resp1.lower()
+
+        # Step 2: Date filter
+        resp2 = clean_agent.handle_turn(session, "today")
+        assert "today" in resp2.lower() or "Patel" in resp2
+
+        # Step 3: Pick time
+        resp3 = clean_agent.handle_turn(session, "3:30")
+        assert "CONFIRMED" in resp3 or "confirmed" in resp3.lower()
+        assert session.booking_status == "CONFIRMED"
+        first_apt_id = session.appointment_id
+        assert first_apt_id is not None
+
+        # Verify initial booking in database
+        initial_appts = clean_agent.db.get_patient_appointments("+1-555-0199")
+        assert len(initial_appts) == 1
+        assert initial_appts[0].id == first_apt_id
+        initial_slot = initial_appts[0].slot_iso
+
+        # Step 4: User asks to reschedule (with typo 'reshedule')
+        resp4 = clean_agent.handle_turn(session, "i want to reshedule")
+        assert "reschedule" in resp4.lower() or "available" in resp4.lower() or "slot" in resp4.lower()
+        assert session.pending_action == "RESCHEDULE"
+
+        # Step 5: User picks tomorrow
+        resp5 = clean_agent.handle_turn(session, "tomorrow")
+        assert "RESCHEDULED" in resp5 or "rescheduled" in resp5.lower()
+        assert session.booking_status == "CONFIRMED"
+
+        # Step 6: Verify ZERO DUPLICATES IN DATABASE
+        final_appts = clean_agent.db.get_patient_appointments("+1-555-0199")
+        assert len(final_appts) == 1, f"Expected exactly 1 appointment in EHR, but found {len(final_appts)}! (Duplicate booking bug)"
+        assert final_appts[0].id == first_apt_id
+        assert final_appts[0].slot_iso != initial_slot
+        assert "tomorrow" in resp5.lower() or final_appts[0].slot_iso != initial_slot
+
+        # Verify old slot was freed back to AVAILABLE
+        old_slot_row = clean_agent.db.find_available_slots(doctor_id=initial_appts[0].doctor_id)
+        old_slot_isos = [s.start_time_iso for s in old_slot_row]
+        assert initial_slot in old_slot_isos, "Old slot was not released back to AVAILABLE status!"
+
+    def test_doc_peds_alias_resilience_and_no_iso_leakage(self, clean_agent):
+        """Verifies doctor ID resilience (DOC_PEDS_01 -> DOC_PED_01) and ensures no ISO tags leak to patient."""
+        # 1. Alias resolution
+        resolved = clean_agent.db.resolve_doctor_id("DOC_PEDS_01")
+        assert resolved == "DOC_PED_01"
+
+        # 2. Direct atomic booking with alias DOC_PEDS_01 succeeds
+        p_slots = clean_agent.db.find_available_slots(doctor_id="DOC_PED_01")
+        assert len(p_slots) > 0
+        target_slot = p_slots[0].start_time_iso
+        apt, err = clean_agent.db.book_slot_atomic(
+            patient_name="Peds Test",
+            patient_phone="+1-555-7766",
+            doctor_id="DOC_PEDS_01",
+            slot_iso=target_slot,
+            reason="Low fever"
+        )
+        assert err is None
+        assert apt is not None
+        assert apt.doctor_id == "DOC_PED_01"
+
+        # 3. Text sanitization strips [ISO: ...] and [tool slot_iso: ...]
+        raw_msg = "We have slots available: Today at 11:30 AM [ISO: 2026-10-07T11:30:00Z] and Tomorrow [tool slot_iso: 2026-10-08T14:00:00Z]."
+        sanitized = clean_agent._sanitize_patient_text(raw_msg)
+        assert "[ISO:" not in sanitized
+        assert "2026-10-07T11:30:00Z" not in sanitized
+        assert "slot_iso" not in sanitized
+        assert "Today at 11:30 AM and Tomorrow." in sanitized
+

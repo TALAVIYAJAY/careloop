@@ -4,10 +4,10 @@ from typing import Optional, Dict, Any, List
 # Clinical Red-Flag Emergency Keywords (Acute life-threatening presentations)
 EMERGENCY_PATTERNS = [
     # Cardiovascular
-    r"\b(chest pain|chest tightness|chest pressure|heart attack|crushing chest)\b",
+    r"\b(chest (pain|tightness|pressure|hurts?|hurting|ache|aching)|heart attack|crushing chest|pain in (my )?chest)\b",
     r"\b(left arm pain|left arm numbness|radiating to (jaw|neck|arm))\b",
     # Respiratory
-    r"\b(can'?t breathe|severe shortness of breath|gasping for air|struggling to breathe)\b",
+    r"\b((can'?t|cannot|unable to|hard to|difficulty|trouble|struggling to) breath(e|ing)|severe shortness of breath|short of breath|gasping for air)\b",
     r"\b(choking|blue lips|throat closing)\b",
     # Neurological / Stroke (FAST)
     r"\b(facial droop|slurred speech|sudden numbness|sudden weakness|cannot move arm)\b",

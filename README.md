@@ -4,7 +4,7 @@
 > Built with Python 3.10+, Google Gemini 3.5 Flash-Lite, Pydantic, and SQLite.
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-41%20Passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-43%20Passing-brightgreen.svg)]()
 [![Model](https://img.shields.io/badge/LLM-Gemini%203.5%20Flash--Lite-orange.svg)]()
 [![Architecture](https://img.shields.io/badge/Architecture-Dual--Layer%20Closed--Loop-success.svg)](DOCUMENTATION.md)
 
@@ -79,6 +79,7 @@ python app.py
 ### Production 3-Module Architecture:
 1. **🩺 Module 1: Patient Experience Portal (`Patient Portal`)**:
    - **Multi-Turn Clinical Intake Chat**: Real-time patient dialogue powered by Gemini 3.5 Flash-Lite, with intelligent doctor availability recommendations, calendar formatting, and context-aware rescheduling security.
+   - **Interactive Physician & Slot Selector Console**: Dynamic dropdowns allowing patients to select any doctor and see live available slots from SQLite, with 1-click **Book Slot**, **Reschedule**, and **Cancel** actions (eliminating all manual typing errors).
    - **Clinical Triage & Guardrails**: Automatic acute emergency detection (diverting to 911/ER) and strict medical advice / prescription refusal.
    - **1-Click Test Scenarios Bar**: Immediate pre-configured patient profiles for *Alex Turner (Routine)*, *Maria Garcia (Emergency 911)*, *David Kim (Doctor Conflict)*, *Emily Watson (Reschedule)*, and *Robert Chen (Prescription)*.
    - **HIPAA-Compliant Patient Isolation**: Clean patient perspective with zero internal EHR database clutter or cross-patient leaks.

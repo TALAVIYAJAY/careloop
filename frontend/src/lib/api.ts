@@ -157,11 +157,31 @@ export async function fetchSystemStatus(): Promise<SystemStatus> {
   return res.json();
 }
 
-export async function sendChatMessage(sessionId: string, message: string): Promise<ChatResponse> {
+export async function sendChatMessage(
+  sessionId: string,
+  message: string,
+  patientName: string = "Jay Talaviya",
+  patientPhone: string = "+1-555-0199",
+  patientId: string = "PAT_JAY_001",
+  slotIso?: string,
+  doctorId?: string,
+  doctorName?: string
+): Promise<ChatResponse> {
+  const payload: Record<string, any> = {
+    session_id: sessionId,
+    message,
+    patient_name: patientName,
+    patient_phone: patientPhone,
+    patient_id: patientId
+  };
+  if (slotIso) payload.slot_iso = slotIso;
+  if (doctorId) payload.doctor_id = doctorId;
+  if (doctorName) payload.doctor_name = doctorName;
+
   const res = await fetch(`${API_BASE}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId, message }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({ detail: "Unknown error" }));
@@ -170,11 +190,21 @@ export async function sendChatMessage(sessionId: string, message: string): Promi
   return res.json();
 }
 
-export async function resetChatSession(sessionId: string): Promise<void> {
+export async function resetChatSession(
+  sessionId: string,
+  patientName: string = "Jay Talaviya",
+  patientPhone: string = "+1-555-0199",
+  patientId: string = "PAT_JAY_001"
+): Promise<void> {
   await fetch(`${API_BASE}/api/chat/reset`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId }),
+    body: JSON.stringify({
+      session_id: sessionId,
+      patient_name: patientName,
+      patient_phone: patientPhone,
+      patient_id: patientId
+    }),
   });
 }
 
